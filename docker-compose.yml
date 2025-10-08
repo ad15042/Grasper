@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  # バックエンドサービス (FastAPI)
+  backend:
+    build: ./backend
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./.env
+
+  # フロントエンドサービス (Nginx)
+  frontend:
+    image: nginx:1.25-alpine # 公式のNginxイメージを使用
+    restart: always
+    ports:
+      - "3000:80" # PCの3000番ポートをコンテナの80番ポートに接続
+    volumes:
+      # PCのfrontendフォルダをNginxの公開フォルダに同期させる
+      - ./frontend:/usr/share/nginx/html
+    depends_on:
+      - backend
