@@ -3,3 +3,6 @@ uvicorn[standard]
 python-dotenv
 google-generativeai
 fastapi-cors # CORSエラーを回避するために追加
+sqlalchemy
+psycopg2-binary
+alembic # データベースマイグレーション用
