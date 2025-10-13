@@ -23,3 +23,15 @@ services:
       - ./frontend:/usr/share/nginx/html
     depends_on:
       - backend
+
+  # データベースサービス (PostgreSQL) 
+  db:
+    image: postgres:15-alpine # 公式のPostgreSQLイメージを使用
+    restart: always
+    env_file:
+      - ./.env
+    volumes:
+      - db_data:/var/lib/postgresql/data # データ永続化のためのボリューム
+
+volumes:
+  db_data: # DBデータ永続化用の名前付きボリューム

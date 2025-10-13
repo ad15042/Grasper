@@ -1,8 +1,14 @@
 import os
+import json
 import google.generativeai as genai
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from typing import List
+
+# ローカルモジュールをインポート
+import crud, models, schemas
+from database import get_db
 
 # 環境変数からAPIキーを読み込む
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -20,15 +26,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# リクエストボディの型定義
-class UserInput(BaseModel):
-    keyword: str
 
 # Geminiモデルの準備
 model = genai.GenerativeModel('gemini-2.5-pro')
 
-@app.post("/api/generate")
-async def generate_text(user_input: UserInput):
+# --- Create ---
+@app.post("/api/generate", response_model=schemas.History)
+async def generate_text(user_input: schemas.HistoryCreate, db: Session = Depends(get_db)):
     """
     ユーザーからのキーワードを受け取り、Gemini APIで解説を生成する
     """
@@ -50,15 +54,36 @@ async def generate_text(user_input: UserInput):
     
     キーワード: {keyword}
     """
-
+    
     try:
         response = model.generate_content(prompt)
-        # Geminiからのレスポンスは```json ... ```で囲まれていることがあるため、中身を抽出
         cleaned_response = response.text.strip().replace("```json", "").replace("```", "")
-        return {"data": cleaned_response}
+        response_data = json.loads(cleaned_response)
+        
+        # DBに保存
+        return crud.create_history(db=db, keyword=keyword, response_data=response_data)
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
-@app.get("/")
-def read_root():
-    return {"message": "Backend is running."}
+
+# --- Read (複数) ---
+@app.get("/api/history", response_model=List[schemas.History])
+def read_histories(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    histories = crud.get_histories(db, skip=skip, limit=limit)
+    return histories
+
+# --- Read (単一) ---
+@app.get("/api/history/{history_id}", response_model=schemas.History)
+def read_history(history_id: int, db: Session = Depends(get_db)):
+    db_history = crud.get_history(db, history_id=history_id)
+    if db_history is None:
+        raise HTTPException(status_code=404, detail="History not found")
+    return db_history
+
+# --- Delete ---
+@app.delete("/api/history/{history_id}", response_model=schemas.History)
+def delete_history(history_id: int, db: Session = Depends(get_db)):
+    db_history = crud.delete_history(db, history_id=history_id)
+    if db_history is None:
+        raise HTTPException(status_code=404, detail="History not found")
+    return db_history

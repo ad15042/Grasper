@@ -5,60 +5,69 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Knowledge Base</title>
-    <!-- Tailwind CSS (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & Babel (CDN) -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- アイコンライブラリ (Heroicons) -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/heroicons@2.1.1/24/outline/index.min.js"></script>
 </head>
 
 <body class="bg-gray-900 text-white font-sans">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState } = React;
+        const { useState, useEffect } = React;
 
-        // --- ローディングスピナーのコンポーネント ---
-        const Spinner = () => (
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-        );
+        const Spinner = () => <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>;
 
-        // --- メインアプリケーションのコンポーネント ---
         const App = () => {
             const [keyword, setKeyword] = useState('');
-            const [result, setResult] = useState(null);
+            // --- ▼選択された項目 or AIの最新結果を保持するState▼ ---
+            const [activeItem, setActiveItem] = useState(null);
             const [isLoading, setIsLoading] = useState(false);
             const [error, setError] = useState('');
+            const [history, setHistory] = useState([]);
 
+            // --- 履歴取得 ---
+            const fetchHistory = async () => {
+                try {
+                    const response = await fetch('http://localhost:8000/api/history');
+                    const data = await response.json();
+                    setHistory(data);
+                } catch (err) {
+                    console.error("History fetch error:", err);
+                    setError("履歴の読み込みに失敗しました。");
+                }
+            };
+
+            // --- 初回レンダリング時に履歴を取得 ---
+            useEffect(() => {
+                fetchHistory();
+            }, []);
+
+            // --- AIに質問 ---
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 if (!keyword.trim() || isLoading) return;
 
                 setIsLoading(true);
                 setError('');
-                setResult(null);
+                setActiveItem(null);
 
                 try {
                     const response = await fetch('http://localhost:8000/api/generate', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ keyword: keyword })
+                        body: JSON.stringify({ keyword, category: '', summary: '', details: '' })
                     });
+                    if (!response.ok) throw new Error('Network error');
+                    const newHistoryItem = await response.json();
 
-                    if (!response.ok) {
-                        throw new Error('ネットワークエラーが発生しました。');
-                    }
-
-                    const data = await response.json();
-
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
-
-                    // バックエンドから返ってきたJSON文字列をパースする
-                    const parsedData = JSON.parse(data.data);
-                    setResult(parsedData);
+                    // 結果をアクティブにし、履歴リストを更新
+                    setActiveItem(newHistoryItem);
+                    setHistory(prev => [newHistoryItem, ...prev]);
+                    setKeyword('');
 
                 } catch (err) {
                     setError(`エラー: ${err.message}`);
@@ -67,26 +76,69 @@
                 }
             };
 
-            return (
-                <div className="min-h-screen flex flex-col items-center justify-center p-4">
-                    <div className="w-full max-w-2xl mx-auto bg-gray-800 rounded-2xl shadow-xl p-8 space-y-6">
+            // --- 履歴を削除 ---
+            const handleDelete = async (idToDelete) => {
+                if (!confirm('この履歴を削除しますか？')) return;
 
-                        {/* --- ヘッダー --- */}
-                        <div className="text-center">
+                try {
+                    await fetch(`http://localhost:8000/api/history/${idToDelete}`, { method: 'DELETE' });
+                    // UIから削除
+                    setHistory(prev => prev.filter(item => item.id !== idToDelete));
+                    // もし削除した項目がアクティブだったら表示をクリア
+                    if (activeItem && activeItem.id === idToDelete) {
+                        setActiveItem(null);
+                    }
+                } catch (err) {
+                    setError(`削除に失敗しました: ${err.message}`);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex flex-row items-start justify-center p-4 lg:p-8 gap-8">
+
+                    {/* --- メインコンテンツエリア --- */}
+                    <div className="w-full max-w-2xl mx-auto bg-gray-800 rounded-2xl shadow-xl p-6 lg:p-8 flex flex-col mt-8 h-[90vh]">
+                        <div className="text-center mb-6">
                             <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
                                 AI Knowledge Base
                             </h1>
                             <p className="text-gray-400 mt-2">気になるキーワードをAIに質問してみましょう</p>
                         </div>
 
-                        {/* --- 入力フォーム --- */}
-                        <form onSubmit={handleSubmit} className="space-y-4">
+                        {/* 結果表示エリア */}
+                        <div className="flex-grow overflow-y-auto pr-2 space-y-4">
+                            {error && <div className="bg-red-900/50 text-red-300 p-4 rounded-lg">{error}</div>}
+
+                            {activeItem ? (
+                                <div className="bg-gray-700/50 p-6 rounded-lg animate-fade-in space-y-4">
+                                    <h2 className="text-2xl font-bold text-blue-300">{activeItem.keyword}</h2>
+                                    <div className="flex items-center gap-3">
+                                        <span className="bg-purple-500/20 text-purple-300 text-sm font-medium px-3 py-1 rounded-full">{activeItem.category}</span>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-semibold mb-2">要約</h3>
+                                        <p className="text-gray-300">{activeItem.summary}</p>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-semibold mb-2">詳細</h3>
+                                        <div className="prose prose-invert max-w-none text-gray-300" dangerouslySetInnerHTML={{ __html: activeItem.details.replace(/\n/g, '<br />') }}></div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center text-gray-500 pt-16">
+                                    <p>キーワードを入力して質問するか、<br />右の履歴から項目を選択してください。</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 入力フォーム */}
+                        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
                             <textarea
                                 value={keyword}
                                 onChange={(e) => setKeyword(e.target.value)}
                                 placeholder="例: React, 量子コンピュータ, mRNAワクチン..."
                                 className="w-full p-4 bg-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-300 resize-none"
-                                rows="3"
+                                rows="2"
                                 disabled={isLoading}
                             />
                             <button
@@ -97,34 +149,39 @@
                                 {isLoading ? <Spinner /> : 'AIに質問する'}
                             </button>
                         </form>
+                    </div>
 
-                        {/* --- 結果表示エリア --- */}
-                        <div className="space-y-4">
-                            {error && <div className="bg-red-900/50 text-red-300 p-4 rounded-lg">{error}</div>}
-
-                            {result && (
-                                <div className="bg-gray-700/50 p-6 rounded-lg animate-fade-in space-y-4">
-                                    <div className="flex items-center gap-3">
-                                        <span className="bg-purple-500/20 text-purple-300 text-sm font-medium px-3 py-1 rounded-full">{result.category}</span>
-                                    </div>
-                                    <div>
-                                        <h2 className="text-xl font-semibold mb-2">要約</h2>
-                                        <p className="text-gray-300">{result.summary}</p>
-                                    </div>
-                                    <div>
-                                        <h2 className="text-xl font-semibold mb-2">詳細</h2>
-                                        <div className="prose prose-invert max-w-none text-gray-300" dangerouslySetInnerHTML={{ __html: result.details.replace(/\n/g, '<br />') }}>
-                                            {/* マークダウンを簡易的に表示 */}
+                    {/* --- 履歴表示サイドバー --- */}
+                    <div className="w-full max-w-sm h-[90vh] bg-gray-800/50 rounded-2xl p-6 mt-8 flex flex-col">
+                        <h2 className="text-2xl font-bold mb-4 text-gray-300 flex-shrink-0">検索履歴</h2>
+                        <div className="flex-grow overflow-y-auto pr-2">
+                            {history.length > 0 ? (
+                                history.map(item => (
+                                    <div
+                                        key={item.id}
+                                        onClick={() => setActiveItem(item)}
+                                        className={`group p-4 rounded-lg mb-3 cursor-pointer transition-all duration-200 ${activeItem?.id === item.id ? 'bg-blue-500/20' : 'hover:bg-gray-700/80'}`}
+                                    >
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <p className="font-bold text-blue-300 mb-1">{item.keyword}</p>
+                                                <p className="text-sm text-gray-400 line-clamp-2">{item.summary}</p>
+                                            </div>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
+                                                className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition-opacity p-1"
+                                                title="削除"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.033-2.134H8.033C6.91 2.75 6 3.704 6 4.884v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>
+                                            </button>
                                         </div>
                                     </div>
-                                </div>
+                                ))
+                            ) : (
+                                <p className="text-gray-500 text-center pt-8">まだ履歴がありません。</p>
                             )}
                         </div>
-
                     </div>
-                    <footer className="text-center mt-8 text-gray-500 text-sm">
-                        <p>Powered by Gemini API & FastAPI & React</p>
-                    </footer>
                 </div>
             );
         };
@@ -153,6 +210,13 @@
 
         .animate-fade-in {
             animation: fade-in 0.5s ease-out forwards;
+        }
+
+        .line-clamp-2 {
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
         }
     </style>
 </body>
