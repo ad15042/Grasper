@@ -11,8 +11,15 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # SQLAlchemyのベースクラス
+'''
+モデルの Base を作成
+この Base を基にモデルを定義するとmetadataにモデルの情報が格納されていく
+'''
 Base = declarative_base()
 
+'''
+データベースセッションを取得するための依存関係
+'''
 def get_db():
     """
     データベースセッションを取得するための依存関係

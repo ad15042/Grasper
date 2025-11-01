@@ -1,32 +1,38 @@
 from sqlalchemy.orm import Session
 import models, schemas
 
-# --- Read (単一) ---
 def get_history(db: Session, history_id: int):
-    return db.query(models.GeneratedContent).filter(models.GeneratedContent.id == history_id).first()
+    """ 指定されたIDの履歴を1件取得 """
+    return db.query(models.GenerationHistory).filter(models.GenerationHistory.id == history_id).first()
 
-# --- Read (複数) ---
-def get_histories(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.GeneratedContent).order_by(models.GeneratedContent.id.desc()).offset(skip).limit(limit).all()
+def get_all_histories(db: Session, skip: int = 0, limit: int = 100):
+    """ 全ての履歴を取得 """
+    return db.query(models.GenerationHistory).order_by(models.GenerationHistory.id.desc()).offset(skip).limit(limit).all()
 
-# --- Create ---
-def create_history(db: Session, keyword: str, response_data: dict):
-    db_history = models.GeneratedContent(
-        keyword=keyword,
-        category=response_data.get("category"),
-        summary=response_data.get("summary"),
-        details=response_data.get("details")
-    )
+def create_history(db: Session, history: schemas.HistoryCreate):
+    """ 新しい履歴を作成 """
+    db_history = models.GenerationHistory(**history.dict())
     db.add(db_history)
     db.commit()
     db.refresh(db_history)
     return db_history
 
-# --- Delete ---
 def delete_history(db: Session, history_id: int):
-    db_history = db.query(models.GeneratedContent).filter(models.GeneratedContent.id == history_id).first()
+    """ 指定されたIDの履歴を削除 """
+    db_history = db.query(models.GenerationHistory).filter(models.GenerationHistory.id == history_id).first()
     if db_history:
         db.delete(db_history)
         db.commit()
         return db_history
     return None
+
+def toggle_favorite(db: Session, history_id: int):
+    """ 指定されたIDの履歴のお気に入り状態を切り替え """
+    db_history = db.query(models.GenerationHistory).filter(models.GenerationHistory.id == history_id).first()
+    if db_history:
+        db_history.is_favorite = not db_history.is_favorite
+        db.commit()
+        db.refresh(db_history)
+        return db_history
+    return None
+
