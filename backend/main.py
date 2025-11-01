@@ -1,89 +1,110 @@
-import os
-import json
-import google.generativeai as genai
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List
+import google.generativeai as genai
+import os
+import json
 
-# ローカルモジュールをインポート
 import crud, models, schemas
-from database import get_db
+from database import SessionLocal, engine, get_db
 
-# 環境変数からAPIキーを読み込む
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
+# --- Alembicを使わない場合はこの行を有効化 ---
+# models.Base.metadata.create_all(bind=engine)
 
-# FastAPIアプリケーションの初期化
+# --- Google Gemini API Configuration ---
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("GEMINI_API_KEY is not set.")
+genai.configure(api_key=api_key)
+# Geminiモデルの準備
+model = genai.GenerativeModel('gemini-2.5-pro')
+
 app = FastAPI()
 
-# CORSミドルウェアの設定 (フロントエンドからのアクセスを許可)
+# --- CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # 本番環境では特定のドメインに制限してください
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# Geminiモデルの準備
-model = genai.GenerativeModel('gemini-2.5-pro')
-
-# --- Create ---
 @app.post("/api/generate", response_model=schemas.History)
-async def generate_text(user_input: schemas.HistoryCreate, db: Session = Depends(get_db)):
-    """
-    ユーザーからのキーワードを受け取り、Gemini APIで解説を生成する
-    """
-    keyword = user_input.keyword
+def generate_and_save(request: schemas.HistoryCreate, db: Session = Depends(get_db)):
+    """ Gemini APIでテキストを生成し、DBに保存する """
+    try:
+        # Create history entry in the database
+        history_entry = crud.create_history(db=db, history=request)
+        return history_entry
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    # --- ここでシステムプロンプトを制御します ---
-    # AIに役割を与え、出力形式をJSONに指定する
-    prompt = f"""
-    あなたはITと創薬分野の専門家です。
-    以下のキーワードについて、初心者にも分かりやすく、簡潔に解説してください。
-    
-    回答は必ず以下のJSON形式の回答だけを出力してください。
-    他の形式での出力は認められません。
+@app.post("/api/generate-ai-response")
+async def generate_ai_response(request: dict):
+    term = request.get("term")
+    if not term:
+        raise HTTPException(status_code=400, detail="Term is required")
+        
+    system_prompt = f"""
+    あなたは優秀なアシスタントです。ユーザーから与えられたキーワード「{term}」について、以下のJSON形式で解説を生成してください。
+    他の形式での出力は避け、必ずJSON形式で出力してください。
+    フィールド:
+    - category_large: 最も適切な大項目カテゴリを一つ設定してください。（例: IT, 医療, 経済）
+    - category_medium: 中項目カテゴリを一つ設定してください。（例: プログラミング, 創薬, 金融）
+    - category_small: (任意) 小項目カテゴリがあれば設定してください。（例: Python, 分子標的薬, 株式市場）
+    - summary: 100文字程度の短い要約。
+    - details: 500文字程度の詳細な解説。
+
     {{
-      "category": "このキーワードが最も関連するカテゴリ（例: 'IT', 'Web開発', '創薬', '分子生物学'など）",
-      "summary": "100文字程度の簡単な要約",
-      "details": "詳細な解説をマークダウン形式で記述"
+      "term": "{term}",
+      "category_large": "...",
+      "category_medium": "...",
+      "category_small": "...",
+      "summary": "...",
+      "details": "..."
     }}
-    
-    キーワード: {keyword}
     """
     
     try:
-        response = model.generate_content(prompt)
-        cleaned_response = response.text.strip().replace("```json", "").replace("```", "")
-        response_data = json.loads(cleaned_response)
-        
-        # DBに保存
-        return crud.create_history(db=db, keyword=keyword, response_data=response_data)
+        response = model.generate_content(system_prompt)
+        # レスポンスからJSON部分を抽出
+        json_response_str = response.text.strip().replace("```json", "").replace("```", "")
+        json_response = json.loads(json_response_str)
+        return json_response
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI response generation failed: {str(e)}")
 
 
-# --- Read (複数) ---
 @app.get("/api/history", response_model=List[schemas.History])
-def read_histories(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    histories = crud.get_histories(db, skip=skip, limit=limit)
+def read_all_histories(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """ 全ての履歴を取得する """
+    histories = crud.get_all_histories(db, skip=skip, limit=limit)
     return histories
 
-# --- Read (単一) ---
 @app.get("/api/history/{history_id}", response_model=schemas.History)
 def read_history(history_id: int, db: Session = Depends(get_db)):
+    """ IDで単一の履歴を取得する """
     db_history = crud.get_history(db, history_id=history_id)
     if db_history is None:
         raise HTTPException(status_code=404, detail="History not found")
     return db_history
 
-# --- Delete ---
 @app.delete("/api/history/{history_id}", response_model=schemas.History)
-def delete_history(history_id: int, db: Session = Depends(get_db)):
-    db_history = crud.delete_history(db, history_id=history_id)
-    if db_history is None:
+def delete_history_entry(history_id: int, db: Session = Depends(get_db)):
+    """ IDで履歴を削除する """
+    deleted_history = crud.delete_history(db, history_id=history_id)
+    if deleted_history is None:
         raise HTTPException(status_code=404, detail="History not found")
-    return db_history
+    return deleted_history
+
+@app.patch("/api/history/{history_id}/favorite", response_model=schemas.History)
+def toggle_favorite_status(history_id: int, db: Session = Depends(get_db)):
+    """ IDでお気に入り状態を切り替える """
+    toggled_history = crud.toggle_favorite(db, history_id=history_id)
+    if toggled_history is None:
+        raise HTTPException(status_code=404, detail="History not found")
+    return toggled_history
+
