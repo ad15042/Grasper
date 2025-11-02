@@ -65,8 +65,8 @@
                                     <button
                                         onClick={() => setView({ name: item.id })}
                                         className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${currentView.name === item.id
-                                                ? 'bg-indigo-500 text-white'
-                                                : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                                            ? 'bg-indigo-500 text-white'
+                                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                                             }`}
                                     >
                                         {item.label}
@@ -157,10 +157,35 @@
             const [histories, setHistories] = useState([]);
             const [isLoading, setIsLoading] = useState(true);
             const [error, setError] = useState(null);
+            const [filters, setFilters] = useState({
+                term: '',
+                category_large: '',
+                category_medium: '',
+                is_favorite: false
+            });
+            const [categories, setCategories] = useState({ large: [], medium: [] });
+
+            const fetchCategories = async () => {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/categories`);
+                    if (!response.ok) throw new Error('カテゴリの取得に失敗しました。');
+                    const data = await response.json();
+                    setCategories(data);
+                } catch (err) {
+                    setError(err.message);
+                }
+            };
 
             const fetchData = useCallback(async () => {
+                setIsLoading(true);
                 try {
-                    const response = await fetch(`${API_BASE_URL}/history`);
+                    const params = new URLSearchParams();
+                    if (filters.term) params.append('term', filters.term);
+                    if (filters.category_large) params.append('category_large', filters.category_large);
+                    if (filters.category_medium) params.append('category_medium', filters.category_medium);
+                    if (filters.is_favorite) params.append('is_favorite', String(filters.is_favorite));
+
+                    const response = await fetch(`${API_BASE_URL}/history?${params.toString()}`);
                     if (!response.ok) throw new Error('データの取得に失敗しました。');
                     const data = await response.json();
                     setHistories(data);
@@ -169,71 +194,121 @@
                 } finally {
                     setIsLoading(false);
                 }
+            }, [filters]);
+
+            useEffect(() => {
+                fetchCategories();
             }, []);
 
             useEffect(() => {
-                fetchData();
-            }, [fetchData]);
+                const timer = setTimeout(() => {
+                    fetchData();
+                }, 500);
+                return () => clearTimeout(timer);
+            }, [filters, fetchData]);
+
+            const handleFilterChange = (e) => {
+                const { name, value, type, checked } = e.target;
+                setFilters(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+            };
+
+            const handleClearFilters = () => {
+                setFilters({
+                    term: '',
+                    category_large: '',
+                    category_medium: '',
+                    is_favorite: false
+                });
+            };
 
             const handleToggleFavorite = async (id) => {
                 const originalHistories = [...histories];
-                // Optimistic UI update
                 setHistories(histories.map(h => h.id === id ? { ...h, is_favorite: !h.is_favorite } : h));
 
                 try {
                     const response = await fetch(`${API_BASE_URL}/history/${id}/favorite`, { method: 'PATCH' });
                     if (!response.ok) {
-                        // Revert on error
                         setHistories(originalHistories);
                         throw new Error('お気に入りの更新に失敗しました。');
                     }
                 } catch (err) {
                     setError(err.message);
-                    // Revert on error
                     setHistories(originalHistories);
                 }
             };
 
-            if (isLoading) return <div className="text-center p-10">読み込み中...</div>;
             if (error) return <div className="text-center p-10 text-red-400">{error}</div>;
 
             return (
                 <div className="container mx-auto px-6 py-8 fade-in">
                     <h2 className="text-3xl font-bold mb-6">ナレッジ一覧</h2>
-                    <div className="bg-gray-800 shadow-md rounded-lg overflow-hidden">
-                        <table className="min-w-full leading-normal">
-                            <thead>
-                                <tr>
-                                    <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider"></th>
-                                    <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">用語</th>
-                                    <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">大項目</th>
-                                    <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">中項目</th>
-                                    <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">小項目</th>
-                                    <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">作成日</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {histories.map(h => (
-                                    <tr key={h.id} className="hover:bg-gray-700/50">
-                                        <td className="px-5 py-4 border-b border-gray-700 text-sm">
-                                            <button onClick={() => handleToggleFavorite(h.id)} className="text-xl">
-                                                {h.is_favorite ? '⭐' : '☆'}
-                                            </button>
-                                        </td>
-                                        <td className="px-5 py-4 border-b border-gray-700 text-sm">
-                                            <a href="#" onClick={(e) => { e.preventDefault(); setView({ name: 'detail', id: h.id }) }} className="text-indigo-400 hover:underline font-semibold">
-                                                {h.term}
-                                            </a>
-                                        </td>
-                                        <td className="px-5 py-4 border-b border-gray-700 text-sm">{h.category_large}</td>
-                                        <td className="px-5 py-4 border-b border-gray-700 text-sm">{h.category_medium}</td>
-                                        <td className="px-5 py-4 border-b border-gray-700 text-sm">{h.category_small || '-'}</td>
-                                        <td className="px-5 py-4 border-b border-gray-700 text-sm">{new Date(h.created_at).toLocaleDateString()}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+
+                    <div className="bg-gray-800 shadow-md rounded-lg p-4 mb-6">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                            <div>
+                                <label htmlFor="term" className="block text-sm font-medium text-gray-400 mb-1">検索</label>
+                                <input type="text" name="term" id="term" value={filters.term} onChange={handleFilterChange} className="w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-indigo-500 focus:border-indigo-500" />
+                            </div>
+                            <div>
+                                <label htmlFor="category_large" className="block text-sm font-medium text-gray-400 mb-1">大項目</label>
+                                <select name="category_large" id="category_large" value={filters.category_large} onChange={handleFilterChange} className="w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="">すべて</option>
+                                    {categories.large.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label htmlFor="category_medium" className="block text-sm font-medium text-gray-400 mb-1">中項目</label>
+                                <select name="category_medium" id="category_medium" value={filters.category_medium} onChange={handleFilterChange} className="w-full bg-gray-700 border-gray-600 rounded-md shadow-sm text-white focus:ring-indigo-500 focus:border-indigo-500">
+                                    <option value="">すべて</option>
+                                    {categories.medium.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                </select>
+                            </div>
+                            <div className="flex items-center">
+                                <input type="checkbox" name="is_favorite" id="is_favorite" checked={filters.is_favorite} onChange={handleFilterChange} className="h-4 w-4 rounded border-gray-600 bg-gray-700 text-indigo-600 focus:ring-indigo-500" />
+                                <label htmlFor="is_favorite" className="ml-2 text-sm text-gray-300">お気に入りのみ</label>
+                            </div>
+                            <button onClick={handleClearFilters} className="bg-gray-600 text-white font-semibold px-4 py-2 rounded-md hover:bg-gray-500 transition-colors">クリア</button>
+                        </div>
                     </div>
+
+                    {isLoading ? (
+                        <div className="text-center p-10">読み込み中...</div>
+                    ) : (
+                        <div className="bg-gray-800 shadow-md rounded-lg overflow-hidden">
+                            <table className="min-w-full leading-normal">
+                                <thead>
+                                    <tr>
+                                        <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider"></th>
+                                        <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">用語</th>
+                                        <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">大項目</th>
+                                        <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">中項目</th>
+                                        <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">小項目</th>
+                                        <th className="px-5 py-3 border-b-2 border-gray-700 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">作成日</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {histories.map(h => (
+                                        <tr key={h.id} className="hover:bg-gray-700/50">
+                                            <td className="px-5 py-4 border-b border-gray-700 text-sm">
+                                                <button onClick={() => handleToggleFavorite(h.id)} className="text-xl">
+                                                    {h.is_favorite ? '⭐' : '☆'}
+                                                </button>
+                                            </td>
+                                            <td className="px-5 py-4 border-b border-gray-700 text-sm">
+                                                <a href="#" onClick={(e) => { e.preventDefault(); setView({ name: 'detail', id: h.id }) }} className="text-indigo-400 hover:underline font-semibold">
+                                                    {h.term}
+                                                </a>
+                                            </td>
+                                            <td className="px-5 py-4 border-b border-gray-700 text-sm">{h.category_large}</td>
+                                            <td className="px-5 py-4 border-b border-gray-700 text-sm">{h.category_medium}</td>
+                                            <td className="px-5 py-4 border-b border-gray-700 text-sm">{h.category_small || '-'}</td>
+                                            <td className="px-5 py-4 border-b border-gray-700 text-sm">{new Date(h.created_at).toLocaleDateString()}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </div>
             );
         }
