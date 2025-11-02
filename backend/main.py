@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import google.generativeai as genai
 import os
 import json
@@ -79,10 +79,33 @@ async def generate_ai_response(request: dict):
 
 
 @app.get("/api/history", response_model=List[schemas.History])
-def read_all_histories(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def read_all_histories(
+    skip: int = 0, 
+    limit: int = 100, 
+    term: Optional[str] = None,
+    category_large: Optional[str] = None,
+    category_medium: Optional[str] = None,
+    category_small: Optional[str] = None,
+    is_favorite: Optional[bool] = None,
+    db: Session = Depends(get_db)
+):
     """ 全ての履歴を取得する """
-    histories = crud.get_all_histories(db, skip=skip, limit=limit)
+    histories = crud.get_all_histories(
+        db, 
+        skip=skip, 
+        limit=limit,
+        term=term,
+        category_large=category_large,
+        category_medium=category_medium,
+        category_small=category_small,
+        is_favorite=is_favorite
+    )
     return histories
+
+@app.get("/api/categories")
+def get_categories(db: Session = Depends(get_db)):
+    """ ユニークなカテゴリを取得する """
+    return crud.get_unique_categories(db)
 
 @app.get("/api/history/{history_id}", response_model=schemas.History)
 def read_history(history_id: int, db: Session = Depends(get_db)):
